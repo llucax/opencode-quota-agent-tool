@@ -28,10 +28,11 @@ openai          5h 100% (3h13m), weekly 84% (5d)
 
 Provider IDs are opencode's, not the quota package's (`copilot` becomes
 `github-copilot`), so the output is directly usable for routing. Percentages
-are remaining, following whatever `percentDisplayMode` is configured for
-`opencode-quota`. Reset times are humanized deltas, not timestamps, and the
-header always states the cache age so an agent can discount stale numbers on
-its own.
+always read as remaining, regardless of `opencode-quota`'s own
+`percentDisplayMode` setting: a tool an agent routes on needs one unambiguous
+answer, not a display preference that silently flips what a bare percentage
+means. Reset times are humanized deltas, not timestamps, and the header always
+states the cache age so an agent can discount stale numbers on its own.
 
 It makes no network requests of its own; all fetching is the CLI's business,
 and it never writes to or deletes anything under
@@ -48,8 +49,8 @@ means "refetch anything older than that interval," not a hard force.
 ## Installing
 
 This plugin needs `@slkiser/opencode-quota` installed and already working
-(configured, authenticated, and showing quota in the TUI) — it only reads
-that package's cache, it does not fetch anything on its own.
+(configured, authenticated, and showing quota in the TUI); it only reads that
+package's cache, it does not fetch anything on its own.
 
 Once that's confirmed:
 
@@ -77,5 +78,5 @@ tests, callable and testable without loading the plugin into opencode at all.
 `src/plugin.ts`, the file actually symlinked into opencode, only wires them
 together and must keep a single default export: opencode's plugin loader
 iterates every export in a loaded file and treats each one as a plugin
-factory, throwing on the first one that is not a function — so a second named
+factory, throwing on the first one that is not a function, so a second named
 export there would take the whole file's tool down, silently.
