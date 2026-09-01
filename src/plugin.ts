@@ -21,12 +21,6 @@ export default (async () => {
 		return cachedPath
 	}
 
-	function percentDisplayMode(): "remaining" | "used" {
-		const mode = (lastConfig as { experimental?: { quotaToast?: { percentDisplayMode?: unknown } } }).experimental
-			?.quotaToast?.percentDisplayMode
-		return mode === "used" ? "used" : "remaining"
-	}
-
 	return {
 		config: async (config) => {
 			lastConfig = config
@@ -35,13 +29,13 @@ export default (async () => {
 		tool: {
 			quota: tool({
 				description:
-					"Provider quota remaining, from opencode-quota's cache, by opencode provider ID with reset times. Use before spawning to pick a provider. refresh refetches entries older than ~5min only; no hard force exists.",
+					"Remaining provider quota (opencode-quota's cache) by opencode provider ID, with reset times. Use to pick a provider before spawning a session.",
 				args: {
 					refresh: tool.schema
 						.boolean()
 						.optional()
 						.describe(
-							"Refetch quota entries older than opencode-quota's own refresh interval (5min by default) before reading. Not a hard force: the CLI exposes none.",
+							"Best-effort: refetches entries older than opencode-quota's own refresh interval (5min default). Not a true force; the CLI has none.",
 						),
 				},
 				async execute(args) {
@@ -58,7 +52,7 @@ export default (async () => {
 
 						const raw = await runQuotaShowJson(cliPath)
 						const data = parseQuotaExport(JSON.parse(raw))
-						return formatQuotaOutput(data, { percentDisplayMode: percentDisplayMode() })
+						return formatQuotaOutput(data)
 					} catch (error) {
 						// The resolved path may be stale (upgrade, uninstall); re-resolve next call.
 						cachedPath = undefined
