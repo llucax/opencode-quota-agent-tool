@@ -15,8 +15,6 @@ const DEFAULT_STALE_THRESHOLD_SECONDS = 30 * 60
 const GENERIC_NAME_SUFFIXES = new Set(["interactions", "requests", "request", "quota", "limit", "limits", "usage", "tokens"])
 
 export interface FormatQuotaOptions {
-	/** Whether percentages read as remaining or used quota. Defaults to "remaining". */
-	percentDisplayMode?: "remaining" | "used"
 	/** Age past which the header calls the cache out as stale. Defaults to 30 minutes. */
 	staleThresholdSeconds?: number
 	/** Current time in unix seconds, injectable for tests. Defaults to Date.now(). */
@@ -67,31 +65,38 @@ function shortenEntryName(name: string, providerId: string): string {
 	return shortened || name.toLowerCase()
 }
 
-function formatEntry(entry: QuotaExportEntry, providerId: string, nowSeconds: number, percentDisplayMode: "remaining" | "used"): string {
+/**
+ * Percentages always read as remaining, never "used". A tool meant for an
+ * agent to route on has one unambiguous answer; a display preference that
+ * silently flips what a bare "21%" means is a footgun a human reading a bar
+ * chart can shrug off and an agent cannot.
+ */
+function formatEntry(entry: QuotaExportEntry, providerId: string, nowSeconds: number): string {
 	const label = entry.window ? entry.window.toLowerCase() : shortenEntryName(entry.name, providerId)
-	const value =
-		entry.renderType === "value"
-			? entry.value!
-			: `${Math.round(percentDisplayMode === "used" ? 100 - entry.percentRemaining! : entry.percentRemaining!)}%`
+	const value = entry.renderType === "value" ? entry.value! : `${Math.round(entry.percentRemaining!)}%`
 	const resetPart = entry.resetAt !== undefined ? formatResetPart(entry.resetAt - nowSeconds) : undefined
 	return resetPart ? `${label} ${value} (${resetPart})` : `${label} ${value}`
 }
 
 function formatHeader(cacheAgeSeconds: number, staleThresholdSeconds: number): string {
 	const age = formatDurationShort(cacheAgeSeconds)
-	const stale = cacheAgeSeconds > staleThresholdSeconds ? " (stale, over 30m old)" : ""
+	const stale =
+		cacheAgeSeconds > staleThresholdSeconds ? ` (stale, over ${formatDurationShort(staleThresholdSeconds)} old)` : ""
 	return `quota, cached ${age} ago${stale}`
 }
 
 /**
  * Renders the signed-off tool output from a parsed `opencode-quota show
  * --json` document: one header line with cache age, then one line per
- * provider that has data. `unavailable` providers are omitted entirely;
- * `error` providers print their message alone; `partial` providers print
- * their entries followed by the error.
+ * provider that has data. `unavailable` providers are omitted entirely, as
+ * is any provider whose rendered text comes out empty: `buildQuotaExport`
+ * classifies zero entries and zero errors as `ok`, not `error`, so a bare
+ * padded ID with nothing after it is a real shape this must not print, since
+ * an agent would read a blank value as "no quota left" rather than "no
+ * data". `error` providers print their message alone; `partial` providers
+ * print their entries followed by the error.
  */
 export function formatQuotaOutput(data: QuotaExport, options: FormatQuotaOptions = {}): string {
-	const percentDisplayMode = options.percentDisplayMode ?? "remaining"
 	const staleThresholdSeconds = options.staleThresholdSeconds ?? DEFAULT_STALE_THRESHOLD_SECONDS
 	const nowSeconds = options.nowSeconds ?? Math.floor(Date.now() / 1000)
 	const providerIdMap = options.providerIdMap ?? PROVIDER_ID_MAP
@@ -103,22 +108,21 @@ export function formatQuotaOutput(data: QuotaExport, options: FormatQuotaOptions
 		if (status.status === "unavailable") continue
 		const opencodeId = providerIdMap[quotaProviderId] ?? quotaProviderId
 
+		let text: string
 		if (status.status === "error") {
-			rows.push({ id: opencodeId, text: status.error })
-			continue
+			text = status.error
+		} else {
+			const entryText = status.entries.map((entry) => formatEntry(entry, quotaProviderId, nowSeconds)).join(", ")
+			if (status.status === "partial") {
+				const errorText = status.errors.map((error) => error.message).join("; ")
+				text = errorText ? [entryText, errorText].filter(Boolean).join(", ") : entryText
+			} else {
+				text = entryText
+			}
 		}
 
-		const entryText = status.entries
-			.map((entry) => formatEntry(entry, quotaProviderId, nowSeconds, percentDisplayMode))
-			.join(", ")
-
-		if (status.status === "partial") {
-			const errorText = status.errors.map((error) => error.message).join("; ")
-			rows.push({ id: opencodeId, text: errorText ? [entryText, errorText].filter(Boolean).join(", ") : entryText })
-			continue
-		}
-
-		rows.push({ id: opencodeId, text: entryText })
+		if (!text) continue
+		rows.push({ id: opencodeId, text })
 	}
 
 	if (!rows.length) return `${header}\nNo provider data available.`

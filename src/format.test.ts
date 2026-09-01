@@ -114,27 +114,22 @@ test("a partial provider renders its entries plus the error", () => {
 	assert.equal(output.split("\n")[1], "anthropic  5h 50% (1h), weekly window unavailable")
 })
 
-test("a stale cache says so plainly in the header", () => {
+test("a stale cache says so plainly in the header, at the default threshold", () => {
 	const fresh = formatQuotaOutput(baseExport({ cacheAgeSeconds: 60 }), { nowSeconds: NOW })
 	const stale = formatQuotaOutput(baseExport({ cacheAgeSeconds: 45 * 60 }), { nowSeconds: NOW })
 	assert.equal(fresh.split("\n")[0], "quota, cached 1m ago")
 	assert.equal(stale.split("\n")[0], "quota, cached 45m ago (stale, over 30m old)")
 })
 
-test("percentDisplayMode: used inverts the printed percentage", () => {
-	const data = baseExport({
-		providers: {
-			anthropic: {
-				status: "ok",
-				fetchedAt: NOW,
-				entries: [{ name: "Claude 5h", window: "5h", resetAt: NOW + 3600, renderType: "percent", percentRemaining: 18 }],
-			},
-		},
+test("a stale cache reports the actual configured threshold, not a hardcoded one", () => {
+	// A regression test for a real bug: the header used to always say "over 30m
+	// old" regardless of staleThresholdSeconds, so a 5-minute threshold with a
+	// 10-minute-old cache printed a false "over 30m old".
+	const output = formatQuotaOutput(baseExport({ cacheAgeSeconds: 10 * 60 }), {
+		nowSeconds: NOW,
+		staleThresholdSeconds: 5 * 60,
 	})
-	const remaining = formatQuotaOutput(data, { nowSeconds: NOW, percentDisplayMode: "remaining" })
-	const used = formatQuotaOutput(data, { nowSeconds: NOW, percentDisplayMode: "used" })
-	assert.ok(remaining.includes("18%"))
-	assert.ok(used.includes("82%"))
+	assert.equal(output.split("\n")[0], "quota, cached 10m ago (stale, over 5m old)")
 })
 
 test("a value-render entry prints its raw value instead of a percentage", () => {
@@ -167,5 +162,35 @@ test("an entry past its own reset time says so instead of printing a negative du
 
 test("no provider data yields an honest empty-state line instead of a bare header", () => {
 	const output = formatQuotaOutput(baseExport(), { nowSeconds: NOW })
+	assert.equal(output, "quota, cached 4m ago\nNo provider data available.")
+})
+
+test("a provider with status ok and zero entries is omitted, not printed as a dangling blank line", () => {
+	// A regression test for a real bug: buildQuotaExport classifies zero
+	// entries and zero errors as "ok", not "error", so this is a real shape
+	// upstream can produce. Printing it as a padded ID with nothing after it
+	// reads to an agent as "no quota left" rather than "no data".
+	const data = baseExport({
+		providers: {
+			anthropic: { status: "ok", fetchedAt: NOW, entries: [] },
+			openai: {
+				status: "ok",
+				fetchedAt: NOW,
+				entries: [{ name: "OpenAI 5h", window: "5h", resetAt: NOW + 3600, renderType: "percent", percentRemaining: 50 }],
+			},
+		},
+	})
+	const output = formatQuotaOutput(data, { nowSeconds: NOW })
+	assert.equal(output, "quota, cached 4m ago\nopenai  5h 50% (1h)")
+	assert.ok(!output.includes("anthropic"), `empty-entries provider leaked into output: ${output}`)
+})
+
+test("a partial provider with zero entries and zero errors is also omitted", () => {
+	const data = baseExport({
+		providers: {
+			anthropic: { status: "partial", fetchedAt: NOW, entries: [], errors: [] },
+		},
+	})
+	const output = formatQuotaOutput(data, { nowSeconds: NOW })
 	assert.equal(output, "quota, cached 4m ago\nNo provider data available.")
 })
