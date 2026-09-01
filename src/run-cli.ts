@@ -5,6 +5,39 @@ const execFileAsync = promisify(execFile)
 
 const TIMEOUT_MS = 15_000
 const MAX_BUFFER_BYTES = 4 * 1024 * 1024
+const RUNTIME_PROBE = "opencode-quota-runtime"
+let defaultRuntime: Promise<string | undefined> | undefined
+
+/**
+ * Resolves an executable that can run a JavaScript file. OpenCode's compiled
+ * executable is not one, even though it is exposed as `process.execPath`.
+ */
+export async function resolveJavaScriptRuntime(
+	execPath: string = process.execPath,
+	candidates: readonly string[] = [execPath, "node", "bun"],
+): Promise<string | undefined> {
+	for (const candidate of new Set(candidates)) {
+		try {
+			const { stdout } = await execFileAsync(
+				candidate,
+				["--eval", `process.stdout.write(${JSON.stringify(RUNTIME_PROBE)})`],
+				{ timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES },
+			)
+			if (stdout === RUNTIME_PROBE) return candidate
+		} catch {
+			// Try the next candidate. A non-JS host executable is expected here.
+		}
+	}
+	return undefined
+}
+
+async function withRuntime(execPath: string): Promise<string> {
+	const runtime = await (execPath === process.execPath
+		? (defaultRuntime ??= resolveJavaScriptRuntime(execPath))
+		: resolveJavaScriptRuntime(execPath))
+	if (!runtime) throw new Error("could not find a JavaScript runtime to run opencode-quota")
+	return runtime
+}
 
 /**
  * Runs `opencode-quota show` (no `--json`) purely for its side effect of
@@ -13,7 +46,7 @@ const MAX_BUFFER_BYTES = 4 * 1024 * 1024
  * afterwards regardless.
  */
 export async function runQuotaShow(cliPath: string, execPath: string = process.execPath): Promise<void> {
-	await execFileAsync(execPath, [cliPath, "show"], { timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES })
+	await execFileAsync(await withRuntime(execPath), [cliPath, "show"], { timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES })
 }
 
 /**
@@ -23,7 +56,7 @@ export async function runQuotaShow(cliPath: string, execPath: string = process.e
  * it propagate.
  */
 export async function runQuotaShowJson(cliPath: string, execPath: string = process.execPath): Promise<string> {
-	const { stdout } = await execFileAsync(execPath, [cliPath, "show", "--json"], {
+	const { stdout } = await execFileAsync(await withRuntime(execPath), [cliPath, "show", "--json"], {
 		timeout: TIMEOUT_MS,
 		maxBuffer: MAX_BUFFER_BYTES,
 	})
