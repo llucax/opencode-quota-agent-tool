@@ -1,0 +1,18 @@
+{
+  "name": "opencode-quota-agent-tool",
+  "private": true,
+  "type": "module",
+  "description": "OpenCode plugin exposing @slkiser/opencode-quota's cached data to agents as a tool",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.18.25",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@types/node": "^24.0.0"
+  }
+}
