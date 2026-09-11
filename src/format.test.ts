@@ -66,10 +66,10 @@ test("matches the signed-off shape: two-entry, single-entry, and window-derived 
 	assert.equal(
 		output,
 		[
-			"quota, cached 4m ago",
-			"anthropic       5h 18% (resets in 50m), weekly 92% (6d)",
-			"github-copilot  premium 100% (29d)",
-			"openai          5h 100% (4h30m), weekly 84% (5d)",
+			"quota, cached 4m ago; spare = remaining% - time-left%, provider = lowest window",
+			"openai          spare +10   5h 100% (4h30m) +10, weekly 84% (5d) +13",
+			"anthropic       spare +1    5h 18% (resets in 50m) +1, weekly 92% (6d) +6",
+			"github-copilot              premium 100% (29d)",
 		].join("\n"),
 	)
 })
@@ -96,7 +96,7 @@ test("an error provider renders as a single line carrying the message", () => {
 		},
 	})
 	const output = formatQuotaOutput(data, { nowSeconds: NOW })
-	assert.equal(output.split("\n")[1], "openrouter  401 unauthorized")
+	assert.equal(output.split("\n")[1], "openrouter              401 unauthorized")
 })
 
 test("a partial provider renders its entries plus the error", () => {
@@ -111,14 +111,17 @@ test("a partial provider renders its entries plus the error", () => {
 		},
 	})
 	const output = formatQuotaOutput(data, { nowSeconds: NOW })
-	assert.equal(output.split("\n")[1], "anthropic  5h 50% (1h), weekly window unavailable")
+	assert.equal(output.split("\n")[1], "anthropic  spare +30   5h 50% (1h) +30, weekly window unavailable")
 })
 
 test("a stale cache says so plainly in the header, at the default threshold", () => {
 	const fresh = formatQuotaOutput(baseExport({ cacheAgeSeconds: 60 }), { nowSeconds: NOW })
 	const stale = formatQuotaOutput(baseExport({ cacheAgeSeconds: 45 * 60 }), { nowSeconds: NOW })
-	assert.equal(fresh.split("\n")[0], "quota, cached 1m ago")
-	assert.equal(stale.split("\n")[0], "quota, cached 45m ago (stale, over 30m old)")
+	assert.equal(fresh.split("\n")[0], "quota, cached 1m ago; spare = remaining% - time-left%, provider = lowest window")
+	assert.equal(
+		stale.split("\n")[0],
+		"quota, cached 45m ago (stale, over 30m old); spare = remaining% - time-left%, provider = lowest window",
+	)
 })
 
 test("a stale cache reports the actual configured threshold, not a hardcoded one", () => {
@@ -129,7 +132,10 @@ test("a stale cache reports the actual configured threshold, not a hardcoded one
 		nowSeconds: NOW,
 		staleThresholdSeconds: 5 * 60,
 	})
-	assert.equal(output.split("\n")[0], "quota, cached 10m ago (stale, over 5m old)")
+	assert.equal(
+		output.split("\n")[0],
+		"quota, cached 10m ago (stale, over 5m old); spare = remaining% - time-left%, provider = lowest window",
+	)
 })
 
 test("a value-render entry prints its raw value instead of a percentage", () => {
@@ -143,7 +149,7 @@ test("a value-render entry prints its raw value instead of a percentage", () => 
 		},
 	})
 	const output = formatQuotaOutput(data, { nowSeconds: NOW })
-	assert.equal(output.split("\n")[1], "cursor  monthly $12.50")
+	assert.equal(output.split("\n")[1], "cursor              monthly $12.50")
 })
 
 test("an entry past its own reset time says so instead of printing a negative duration", () => {
@@ -157,12 +163,28 @@ test("an entry past its own reset time says so instead of printing a negative du
 		},
 	})
 	const output = formatQuotaOutput(data, { nowSeconds: NOW })
-	assert.equal(output.split("\n")[1], "anthropic  5h 50% (resets any moment)")
+	assert.equal(output.split("\n")[1], "anthropic  spare +50   5h 50% (resets any moment) +50")
+})
+
+test("a zero-percent entry past its reset is fully refilled rather than blocked", () => {
+	const data = baseExport({
+		providers: {
+			anthropic: {
+				status: "ok",
+				fetchedAt: NOW,
+				entries: [{ name: "Claude 5h", window: "5h", resetAt: NOW - 60, renderType: "percent", percentRemaining: 0 }],
+			},
+		},
+	})
+	assert.equal(formatQuotaOutput(data, { nowSeconds: NOW }).split("\n")[1], "anthropic  spare +0    5h 0% (resets any moment) +0")
 })
 
 test("no provider data yields an honest empty-state line instead of a bare header", () => {
 	const output = formatQuotaOutput(baseExport(), { nowSeconds: NOW })
-	assert.equal(output, "quota, cached 4m ago\nNo provider data available.")
+	assert.equal(
+		output,
+		"quota, cached 4m ago; spare = remaining% - time-left%, provider = lowest window\nNo provider data available.",
+	)
 })
 
 test("a provider with status ok and zero entries is omitted, not printed as a dangling blank line", () => {
@@ -181,7 +203,10 @@ test("a provider with status ok and zero entries is omitted, not printed as a da
 		},
 	})
 	const output = formatQuotaOutput(data, { nowSeconds: NOW })
-	assert.equal(output, "quota, cached 4m ago\nopenai  5h 50% (1h)")
+	assert.equal(
+		output,
+		"quota, cached 4m ago; spare = remaining% - time-left%, provider = lowest window\nopenai  spare +30   5h 50% (1h) +30",
+	)
 	assert.ok(!output.includes("anthropic"), `empty-entries provider leaked into output: ${output}`)
 })
 
@@ -192,5 +217,32 @@ test("a partial provider with zero entries and zero errors is also omitted", () 
 		},
 	})
 	const output = formatQuotaOutput(data, { nowSeconds: NOW })
-	assert.equal(output, "quota, cached 4m ago\nNo provider data available.")
+	assert.equal(
+		output,
+		"quota, cached 4m ago; spare = remaining% - time-left%, provider = lowest window\nNo provider data available.",
+	)
+})
+
+test("marks a zero-percent window blocked and sorts providers by their lowest spare", () => {
+	const data = baseExport({
+		providers: {
+			openai: {
+				status: "ok",
+				fetchedAt: NOW,
+				entries: [
+					{ name: "OpenAI 5h", window: "5h", resetAt: NOW + 90 * 60, renderType: "percent", percentRemaining: 0 },
+				],
+			},
+			anthropic: {
+				status: "ok",
+				fetchedAt: NOW,
+				entries: [{ name: "Claude 5h", window: "5h", resetAt: NOW + 3 * 3600, renderType: "percent", percentRemaining: 80 }],
+			},
+		},
+	})
+
+	assert.deepEqual(formatQuotaOutput(data, { nowSeconds: NOW }).split("\n").slice(1), [
+		"anthropic  spare +20   5h 80% (3h) +20",
+		"openai     spare -30   5h 0% (1h30m) -30 BLOCKED",
+	])
 })

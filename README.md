@@ -20,10 +20,10 @@ reads its cached, already-fetched provider data, and returns it as text the
 model actually sees:
 
 ```
-quota, cached 4m ago
-anthropic       5h 83% (4h19m), weekly 90% (6d)
-github-copilot  premium 100% (29d)
-openai          5h 100% (3h13m), weekly 84% (5d)
+quota, cached 1m ago; spare = remaining% - time-left%, provider = lowest window
+anthropic       spare -2   5h 97% (4h57m) -2, weekly 49% (2d) +20
+github-copilot  spare -15   premium 48% (19d) -15
+openai          spare -30   5h 0% (1h31m) -30 BLOCKED, weekly 13% (3d) -30
 ```
 
 Provider IDs are opencode's, not the quota package's (`copilot` becomes
@@ -33,6 +33,11 @@ always read as remaining, regardless of `opencode-quota`'s own
 answer, not a display preference that silently flips what a bare percentage
 means. Reset times are humanized deltas, not timestamps, and the header always
 states the cache age so an agent can discount stale numbers on its own.
+
+Each window's spare is its remaining quota share minus its remaining time
+share, in percentage points. The provider spare is its lowest window spare,
+providers sort from highest to lowest spare, and a zero-percent window is
+marked `BLOCKED` until it resets.
 
 It makes no network requests of its own; all fetching is the CLI's business,
 and it never writes to or deletes anything under

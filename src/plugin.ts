@@ -29,7 +29,7 @@ export default (async () => {
 		tool: {
 			quota: tool({
 				description:
-					"Remaining provider quota (opencode-quota's cache) by opencode provider ID, with reset times. Use to pick a provider before spawning a session.",
+					"Remaining provider quota (opencode-quota's cache) by opencode provider ID, with reset times and pace spare. Use to pick a provider before spawning a session.",
 				args: {
 					refresh: tool.schema
 						.boolean()
