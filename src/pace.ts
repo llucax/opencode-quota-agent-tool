@@ -31,8 +31,10 @@ export function windowLengthSeconds(entry: QuotaExportEntry): number | undefined
 	const isMonthly = window?.toLowerCase() === "monthly" || (window === undefined && resetsAtMonthBoundary)
 	if (!isMonthly) return undefined
 
-	const previousMonthStart = Date.UTC(reset.getUTCFullYear(), reset.getUTCMonth() - 1, 1) / 1000
-	return resetAt - previousMonthStart
+	const precedingInstant = new Date(resetAt * 1000 - 1000)
+	const containingMonthStart = Date.UTC(precedingInstant.getUTCFullYear(), precedingInstant.getUTCMonth(), 1) / 1000
+	const length = resetAt - containingMonthStart
+	return Number.isFinite(length) && length > 0 ? length : undefined
 }
 
 /** Remaining percentage points after reserving quota at an even pace. */

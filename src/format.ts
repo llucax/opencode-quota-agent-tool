@@ -1,4 +1,5 @@
 import type { QuotaExport, QuotaExportEntry } from "./quota-export.ts"
+import { entrySpare, providerSpare, sortProvidersBySpare } from "./pace.ts"
 
 /**
  * The one known mismatch between opencode-quota's provider IDs and
@@ -71,18 +72,27 @@ function shortenEntryName(name: string, providerId: string): string {
  * silently flips what a bare "21%" means is a footgun a human reading a bar
  * chart can shrug off and an agent cannot.
  */
+function formatSigned(value: number): string {
+	const rounded = Math.round(value)
+	return rounded >= 0 ? `+${rounded}` : `${rounded}`
+}
+
 function formatEntry(entry: QuotaExportEntry, providerId: string, nowSeconds: number): string {
 	const label = entry.window ? entry.window.toLowerCase() : shortenEntryName(entry.name, providerId)
 	const value = entry.renderType === "value" ? entry.value! : `${Math.round(entry.percentRemaining!)}%`
 	const resetPart = entry.resetAt !== undefined ? formatResetPart(entry.resetAt - nowSeconds) : undefined
-	return resetPart ? `${label} ${value} (${resetPart})` : `${label} ${value}`
+	const base = resetPart ? `${label} ${value} (${resetPart})` : `${label} ${value}`
+	const spare = entrySpare(entry, nowSeconds)
+	const withSpare = spare === undefined ? base : `${base} ${formatSigned(spare)}`
+	const blocked = entry.renderType === "percent" && entry.percentRemaining === 0 && entry.resetAt !== undefined && entry.resetAt > nowSeconds
+	return blocked ? `${withSpare} BLOCKED` : withSpare
 }
 
 function formatHeader(cacheAgeSeconds: number, staleThresholdSeconds: number): string {
 	const age = formatDurationShort(cacheAgeSeconds)
 	const stale =
 		cacheAgeSeconds > staleThresholdSeconds ? ` (stale, over ${formatDurationShort(staleThresholdSeconds)} old)` : ""
-	return `quota, cached ${age} ago${stale}`
+	return `quota, cached ${age} ago${stale}; spare = remaining% - time-left%, provider = lowest window`
 }
 
 /**
@@ -103,7 +113,7 @@ export function formatQuotaOutput(data: QuotaExport, options: FormatQuotaOptions
 
 	const header = formatHeader(data.cacheAgeSeconds, staleThresholdSeconds)
 
-	const rows: { id: string; text: string }[] = []
+	const rows: { id: string; text: string; spare: number | undefined }[] = []
 	for (const [quotaProviderId, status] of Object.entries(data.providers)) {
 		if (status.status === "unavailable") continue
 		const opencodeId = providerIdMap[quotaProviderId] ?? quotaProviderId
@@ -122,12 +132,19 @@ export function formatQuotaOutput(data: QuotaExport, options: FormatQuotaOptions
 		}
 
 		if (!text) continue
-		rows.push({ id: opencodeId, text })
+		rows.push({ id: opencodeId, text, spare: providerSpare(status, nowSeconds) })
 	}
 
 	if (!rows.length) return `${header}\nNo provider data available.`
 
-	const idWidth = Math.max(...rows.map((row) => row.id.length)) + 2
-	const lines = [header, ...rows.map((row) => `${row.id.padEnd(idWidth)}${row.text}`)]
+	const sortedRows = sortProvidersBySpare(rows)
+	const idWidth = Math.max(...sortedRows.map((row) => row.id.length)) + 2
+	const lines = [
+		header,
+		...sortedRows.map((row) => {
+			const pace = (row.spare === undefined ? "" : `spare ${formatSigned(row.spare)}`).padEnd(12)
+			return `${row.id.padEnd(idWidth)}${pace}${row.text}`
+		}),
+	]
 	return lines.join("\n")
 }

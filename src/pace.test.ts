@@ -32,6 +32,11 @@ test("derives a null Copilot window from the preceding calendar month", () => {
 	assert.ok(spare !== undefined && Math.abs(spare - (48 - 100 / 3)) < Number.EPSILON * 100)
 })
 
+test("derives an explicit Monthly window from the month containing the instant before reset", () => {
+	const reset = Date.UTC(2026, 9, 15, 12) / 1000
+	assert.equal(windowLengthSeconds(percentEntry({ window: "Monthly", resetAt: reset })), 14.5 * DAY)
+})
+
 test("a reset in the past has no remaining time reservation", () => {
 	assert.equal(entrySpare(percentEntry({ resetAt: 100, percentRemaining: 42 }), 101), 42)
 })
